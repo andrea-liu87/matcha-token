@@ -10,22 +10,19 @@ contract DeployToken is Script {
         // Load deployer's private key from environment variables
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         address deployerAddress = vm.addr(deployerPrivateKey);
-        
+
         // Token configuration parameters
-        uint256 initialSupply = 100_000_000 * 10**18; // 100 million tokens
-        
+        uint256 initialSupply = 100_000_000 * 10 ** 18; // 100 million tokens
+
         // Start broadcasting transactions
         vm.startBroadcast(deployerPrivateKey);
-        
+
         // Deploy the token contract
-        Matcha token = new Matcha(
-            initialSupply,
-            deployerAddress
-        );
-        
+        Matcha token = new Matcha(initialSupply, deployerAddress);
+
         // Stop broadcasting transactions
         vm.stopBroadcast();
-        
+
         // Log deployment information
         console.log("Token deployed to:", address(token));
         console.log("Token name:", token.name());

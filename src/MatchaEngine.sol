@@ -24,9 +24,11 @@
 
 pragma solidity ^0.8.24;
 
-import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Matcha} from "./Matcha.sol";
+import {OracleLib} from "./libraries/OracleLib.sol";
+import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
 
 /*
  * @title MatchaEngine
@@ -48,7 +50,6 @@ contract MatchaEngine is ReentrancyGuard {
     ///////////////////
     // Erros
     ///////////////////
-    error MatchaEngine__TokenAddressesAndPriceFeedAddressesAmountsDontMatch();
     error MatchaEngine__NeedsMoreThanZero();
     error MatchaEngine__TokenNotAllowed(address token);
     error MatchaEngine__TransferFailed();
@@ -85,12 +86,7 @@ contract MatchaEngine is ReentrancyGuard {
     // Events
     ///////////////////
     event CollateralDeposited(address indexed user, uint256 indexed amount);
-    event CollateralRedeemed(
-        address indexed redeemedFrom,
-        uint256 indexed amountCollateral,
-        address from,
-        address to
-    ); // if from != to, then it was liquidated
+    event CollateralRedeemed(address indexed redeemedFrom, uint256 indexed amountCollateral, address from, address to); // if from != to, then it was liquidated
 
     ///////////////////
     // Modifiers
@@ -105,16 +101,9 @@ contract MatchaEngine is ReentrancyGuard {
     ///////////////////
     // Functions
     ///////////////////
-    constructor(
-        address memory ethAddress,
-        address memory ethPriceFeedAddress,
-        address matchaAddress
-    ) {
-        if (tokenAddresses.length != priceFeedAddresses.length) {
-            revert MatchaEngine__TokenAddressesAndPriceFeedAddressesAmountsDontMatch();
-        }
+    constructor(address ethAddress, address ethPriceFeedAddress, address matchaAddress) {
         s_collateralTokenPriceFeed = ethPriceFeedAddress; // eth pricefeed address
-        s_collateralToken = ethAddress; 
+        s_collateralToken = ethAddress;
         i_matcha = Matcha(matchaAddress);
     }
 
@@ -126,10 +115,7 @@ contract MatchaEngine is ReentrancyGuard {
      * @param amountMatchaToMint: The amount of Matcha you want to mint
      * @notice This function will deposit your collateral and mint Matcha in one transaction
      */
-    function depositCollateralAndMintMatcha(
-        uint256 amountCollateral,
-        uint256 amountMatchaToMint
-    ) external {
+    function depositCollateralAndMintMatcha(uint256 amountCollateral, uint256 amountMatchaToMint) external {
         depositCollateral(amountCollateral);
         mintMatcha(amountMatchaToMint);
     }
@@ -139,16 +125,12 @@ contract MatchaEngine is ReentrancyGuard {
      * @param amountMatchaToBurn: The amount of Matcha you want to burn
      * @notice This function will deposit your collateral and burn Matcha in one transaction
      */
-    function redeemCollateralForMatcha(
-        uint256 amountCollateral,
-        uint256 amountMatchaToBurn
-    ) external moreThanZero(amountCollateral) {
+    function redeemCollateralForMatcha(uint256 amountCollateral, uint256 amountMatchaToBurn)
+        external
+        moreThanZero(amountCollateral)
+    {
         _burnMatcha(amountMatchaToBurn, msg.sender, msg.sender);
-        _redeemCollateral(
-            amountCollateral,
-            msg.sender,
-            msg.sender
-        );
+        _redeemCollateral(amountCollateral, msg.sender, msg.sender);
         revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -157,14 +139,8 @@ contract MatchaEngine is ReentrancyGuard {
      * @notice This function will redeem your collateral.
      * @notice If you have Matcha minted, you will not be able to redeem until you burn your Matcha
      */
-    function redeemCollateral(
-        uint256 amountCollateral
-    ) external moreThanZero(amountCollateral) nonReentrant {
-        _redeemCollateral(
-            amountCollateral,
-            msg.sender,
-            msg.sender
-        );
+    function redeemCollateral(uint256 amountCollateral) external moreThanZero(amountCollateral) nonReentrant {
+        _redeemCollateral(amountCollateral, msg.sender, msg.sender);
         revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -190,10 +166,7 @@ contract MatchaEngine is ReentrancyGuard {
      * @notice: A known bug would be if the protocol was only 100% collateralized, we wouldn't be able to liquidate anyone.
      * For example, if the price of the collateral plummeted before anyone could be liquidated.
      */
-    function liquidate(
-        address user,
-        uint256 debtToCover
-    ) external moreThanZero(debtToCover) nonReentrant {
+    function liquidate(address user, uint256 debtToCover) external moreThanZero(debtToCover) nonReentrant {
         uint256 startingUserHealthFactor = _healthFactor(user);
         if (startingUserHealthFactor >= MIN_HEALTH_FACTOR) {
             revert MatchaEngine__HealthFactorOk();
@@ -204,15 +177,10 @@ contract MatchaEngine is ReentrancyGuard {
         // So we are giving the liquidator $110 of ETH for 100 Matcha
         // We should implement a feature to liquidate in the event the protocol is insolvent
         // And sweep extra amounts into a treasury
-        uint256 bonusCollateral = (tokenAmountFromDebtCovered *
-            LIQUIDATION_BONUS) / 100;
+        uint256 bonusCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / 100;
         // Burn Matcha equal to debtToCover
         // Figure out how much collateral to recover based on how much burnt
-        _redeemCollateral(
-            tokenAmountFromDebtCovered + bonusCollateral,
-            user,
-            msg.sender
-        );
+        _redeemCollateral(tokenAmountFromDebtCovered + bonusCollateral, user, msg.sender);
         _burnMatcha(debtToCover, user, msg.sender);
 
         uint256 endingUserHealthFactor = _healthFactor(user);
@@ -229,9 +197,7 @@ contract MatchaEngine is ReentrancyGuard {
      * @param amountMatchaToMint: The amount of Matcha you want to mint
      * You can only mint Matcha if you hav enough collateral
      */
-    function mintMatcha(
-        uint256 amountMatchaToMint
-    ) public moreThanZero(amountMatchaToMint) nonReentrant {
+    function mintMatcha(uint256 amountMatchaToMint) public moreThanZero(amountMatchaToMint) nonReentrant {
         s_userToMatchaMinted[msg.sender] += amountMatchaToMint;
         revertIfHealthFactorIsBroken(msg.sender);
         bool minted = i_matcha.mint(msg.sender, amountMatchaToMint);
@@ -243,18 +209,10 @@ contract MatchaEngine is ReentrancyGuard {
     /*
      * @param amountCollateral: The amount of collateral you're depositing
      */
-    function depositCollateral(uint256 amountCollateral)
-        public
-        moreThanZero(amountCollateral)
-        nonReentrant
-    {
+    function depositCollateral(uint256 amountCollateral) public moreThanZero(amountCollateral) nonReentrant {
         s_userToAmountDeposited[msg.sender] += amountCollateral;
         emit CollateralDeposited(msg.sender, amountCollateral);
-        bool success = IERC20(s_collateralToken).transferFrom(
-            msg.sender,
-            address(this),
-            amountCollateral
-        );
+        bool success = IERC20(s_collateralToken).transferFrom(msg.sender, address(this), amountCollateral);
         if (!success) {
             revert MatchaEngine__TransferFailed();
         }
@@ -263,34 +221,19 @@ contract MatchaEngine is ReentrancyGuard {
     ///////////////////
     // Private Functions
     ///////////////////
-    function _redeemCollateral(
-        uint256 amountCollateral,
-        address from,
-        address to
-    ) private {
+    function _redeemCollateral(uint256 amountCollateral, address from, address to) private {
         s_userToAmountDeposited[from] -= amountCollateral;
         emit CollateralRedeemed(from, amountCollateral, from, to);
-        bool success = IERC20(s_collateralToken).transfer(
-            to,
-            amountCollateral
-        );
+        bool success = IERC20(s_collateralToken).transfer(to, amountCollateral);
         if (!success) {
             revert MatchaEngine__TransferFailed();
         }
     }
 
-    function _burnMatcha(
-        uint256 amountMatchaToBurn,
-        address onBehalfOf,
-        address matchaFrom
-    ) private {
+    function _burnMatcha(uint256 amountMatchaToBurn, address onBehalfOf, address matchaFrom) private {
         s_userToMatchaMinted[onBehalfOf] -= amountMatchaToBurn;
 
-        bool success = i_matcha.transferFrom(
-            matchaFrom,
-            address(this),
-            amountMatchaToBurn
-        );
+        bool success = i_matcha.transferFrom(matchaFrom, address(this), amountMatchaToBurn);
         if (!success) {
             revert MatchaEngine__TransferFailed();
         }
@@ -301,9 +244,7 @@ contract MatchaEngine is ReentrancyGuard {
     // Private & Internal View & Pure Functions
     //////////////////////////////
 
-    function _getAccountInformation(
-        address user
-    )
+    function _getAccountInformation(address user)
         private
         view
         returns (uint256 totalMatchaMinted, uint256 collateralValueInUsd)
@@ -313,37 +254,31 @@ contract MatchaEngine is ReentrancyGuard {
     }
 
     function _healthFactor(address user) private view returns (uint256) {
-        (
-            uint256 totalMatchaMinted,
-            uint256 collateralValueInUsd
-        ) = _getAccountInformation(user);
+        (uint256 totalMatchaMinted, uint256 collateralValueInUsd) = _getAccountInformation(user);
         return _calculateHealthFactor(totalMatchaMinted, collateralValueInUsd);
     }
 
     /**
-     * 
+     *
      * @param amount Amount of Matcha to be valued as USD
      */
-    function _getUsdValue(
-        uint256 amount
-    ) private view returns (uint256) {
+    function _getUsdValue(uint256 amount) private view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_collateralTokenPriceFeed);
-        (, int256 price, , , ) = priceFeed.staleCheckLatestRoundData();
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
         // 1 ETH = 1000 USD
         // The returned value from Chainlink will be 1000 * 1e8
         // Most USD pairs have 8 decimals, so we will just pretend they all do
         // We want to have everything in terms of WEI, so we add 10 zeros at the end
-        return
-            ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
+        return ((uint256(price) * ADDITIONAL_FEED_PRECISION) * amount) / PRECISION;
     }
 
-    function _calculateHealthFactor(
-        uint256 totalMatchaMinted,
-        uint256 collateralValueInUsd
-    ) internal pure returns (uint256) {
+    function _calculateHealthFactor(uint256 totalMatchaMinted, uint256 collateralValueInUsd)
+        internal
+        pure
+        returns (uint256)
+    {
         if (totalMatchaMinted == 0) return type(uint256).max;
-        uint256 collateralAdjustedForThreshold = (collateralValueInUsd *
-            LIQUIDATION_THRESHOLD) / 100;
+        uint256 collateralAdjustedForThreshold = (collateralValueInUsd * LIQUIDATION_THRESHOLD) / 100;
         return (collateralAdjustedForThreshold * 1e18) / totalMatchaMinted;
     }
 
@@ -359,16 +294,15 @@ contract MatchaEngine is ReentrancyGuard {
     // External & Public View & Pure Functions
     ////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////
-    function calculateHealthFactor(
-        uint256 totalMatchaMinted,
-        uint256 collateralValueInUsd
-    ) external pure returns (uint256) {
+    function calculateHealthFactor(uint256 totalMatchaMinted, uint256 collateralValueInUsd)
+        external
+        pure
+        returns (uint256)
+    {
         return _calculateHealthFactor(totalMatchaMinted, collateralValueInUsd);
     }
 
-    function getAccountInformation(
-        address user
-    )
+    function getAccountInformation(address user)
         external
         view
         returns (uint256 totalMatchaMinted, uint256 collateralValueInUsd)
@@ -379,34 +313,27 @@ contract MatchaEngine is ReentrancyGuard {
     function getUsdValue(
         uint256 amount // in WEI
     ) external view returns (uint256) {
-        return _getUsdValue(token, amount);
+        return _getUsdValue(amount);
     }
 
-    function getCollateralBalanceOfUser(
-        address user
-    ) external view returns (uint256) {
+    function getCollateralBalanceOfUser(address user) external view returns (uint256) {
         return s_userToAmountDeposited[user];
     }
 
-    function getAccountCollateralValue(
-        address user
-    ) public view returns (uint256 totalCollateralValueInUsd) {
+    function getAccountCollateralValue(address user) public view returns (uint256 totalCollateralValueInUsd) {
         uint256 amount = s_userToAmountDeposited[user];
         totalCollateralValueInUsd += _getUsdValue(amount);
         return totalCollateralValueInUsd;
     }
 
-    function getTokenAmountFromUsd(
-        uint256 usdAmountInWei
-    ) public view returns (uint256) {
+    function getTokenAmountFromUsd(uint256 usdAmountInWei) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(s_collateralTokenPriceFeed);
-        (, int256 price, , , ) = priceFeed.staleCheckLatestRoundData();
+        (, int256 price,,,) = priceFeed.staleCheckLatestRoundData();
         // $100e18 USD Debt
         // 1 ETH = 2000 USD
         // The returned value from Chainlink will be 2000 * 1e8
         // Most USD pairs have 8 decimals, so we will just pretend they all do
-        return ((usdAmountInWei * PRECISION) /
-            (uint256(price) * ADDITIONAL_FEED_PRECISION));
+        return ((usdAmountInWei * PRECISION) / (uint256(price) * ADDITIONAL_FEED_PRECISION));
     }
 
     function getPrecision() external pure returns (uint256) {
@@ -429,7 +356,7 @@ contract MatchaEngine is ReentrancyGuard {
         return MIN_HEALTH_FACTOR;
     }
 
-    function getCollateralToken() external view returns (address[] memory) {
+    function getCollateralToken() external view returns (address) {
         return s_collateralToken;
     }
 
@@ -437,9 +364,7 @@ contract MatchaEngine is ReentrancyGuard {
         return address(i_matcha);
     }
 
-    function getCollateralTokenPriceFeed(
-        address token
-    ) external view returns (address) {
+    function getCollateralTokenPriceFeed(address token) external view returns (address) {
         return s_collateralTokenPriceFeed;
     }
 
