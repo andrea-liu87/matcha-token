@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import {Test,console} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {MatchaEngine} from "../../src/MatchaEngine.sol";
 import {Matcha} from "../../src/Matcha.sol";
 import {MockV3Aggregator} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
@@ -30,17 +30,13 @@ contract MatchaEngineTest is Test {
         // Deploy mock tokens and price feed
         weth = new ERC20Mock();
         ethUsdPriceFeed = new MockV3Aggregator(8, int256(ETH_STARTING_PRICE));
-        
+
         // Deploy Matcha token
         vm.prank(owner);
         matcha = new Matcha(INITIAL_SUPPLY, owner);
 
         // Deploy MatchaEngine
-        matchaEngine = new MatchaEngine(
-            address(weth),
-            address(ethUsdPriceFeed),
-            address(matcha)
-        );
+        matchaEngine = new MatchaEngine(address(weth), address(ethUsdPriceFeed), address(matcha));
 
         // Set up initial balances
         weth.mint(user, 10 ether);
@@ -70,7 +66,7 @@ contract MatchaEngineTest is Test {
     // ============ Deposit Collateral Tests ============
     function test_DepositCollateral() public {
         uint256 initialBalance = weth.balanceOf(user);
-        
+
         vm.prank(user);
         matchaEngine.depositCollateral(DEPOSIT_AMOUNT);
 
@@ -147,7 +143,7 @@ contract MatchaEngineTest is Test {
 
         // Try to mint too much Matcha (more than collateral allows)
         uint256 excessiveMint = 3000 ether; // $3000 worth, but only $2000 collateral
-        
+
         vm.prank(user);
         vm.expectRevert(MatchaEngine.MatchaEngine__BreaksHealthFactor.selector);
         matchaEngine.mintMatcha(excessiveMint);
@@ -160,7 +156,7 @@ contract MatchaEngineTest is Test {
         matchaEngine.depositCollateralAndMintMatcha(DEPOSIT_AMOUNT, MINT_AMOUNT);
 
         uint256 initialMatchaBalance = matcha.balanceOf(user);
-        
+
         vm.prank(user);
         matchaEngine.burnMatcha(MINT_AMOUNT / 2);
 
@@ -174,7 +170,7 @@ contract MatchaEngineTest is Test {
         matchaEngine.depositCollateral(DEPOSIT_AMOUNT);
 
         uint256 initialWethBalance = weth.balanceOf(user);
-        
+
         vm.prank(user);
         matchaEngine.redeemCollateral(DEPOSIT_AMOUNT / 2);
 
@@ -205,7 +201,7 @@ contract MatchaEngineTest is Test {
         // Liquidator prepares by getting Matcha tokens
         vm.prank(address(matchaEngine));
         matcha.transfer(liquidator, MINT_AMOUNT / 2);
-        
+
         vm.prank(liquidator);
         matcha.approve(address(matchaEngine), type(uint256).max);
 
@@ -217,7 +213,7 @@ contract MatchaEngineTest is Test {
 
         // Liquidator should have received collateral with bonus
         assertGt(weth.balanceOf(liquidator), initialLiquidatorWeth);
-        
+
         // user's debt should be reduced
         (uint256 totalMintedAfter,) = matchaEngine.getAccountInformation(user);
         assertLt(totalMintedAfter, MINT_AMOUNT);
@@ -299,7 +295,7 @@ contract MatchaEngineTest is Test {
     function testCalculateHealthFactor() public {
         uint256 healthFactor = matchaEngine.calculateHealthFactor(
             1000 ether, // $1000 debt
-            3000 ether  // $3000 collateral
+            3000 ether // $3000 collateral
         );
         // collateralAdjustedForThreshold = 3000 * 50 / 100 = 1500
         // healthFactor = (1500 * 1e18) / 1000 = 1.5e18
