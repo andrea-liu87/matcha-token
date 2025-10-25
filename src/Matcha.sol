@@ -16,10 +16,8 @@ contract Matcha is ERC20, Ownable {
 
     // Maximum number of tokens that can ever exist
     uint256 public constant MAX_SUPPLY = 1_000_000_000 * 10 ** 18; // 1 billion tokens
-    string public constant name = "Matcha Token";
-    string public constant symbol = "MATCHA";
 
-    constructor(uint256 initialSupply, address initialOwner) ERC20(name, symbol) Ownable(initialOwner) {
+    constructor(uint256 initialSupply, address initialOwner) ERC20("Matcha Token", "MATCHA") Ownable(initialOwner) {
         require(initialSupply <= MAX_SUPPLY, "Initial supply exceeds max supply");
         // Mint initial supply to the contract deployer
         _mint(initialOwner, initialSupply);
@@ -37,7 +35,7 @@ contract Matcha is ERC20, Ownable {
         if (amount <= 0) {
             revert Matcha__AmountMustBeMoreThanZero();
         }
-        if (totalSupply() + amount >= MAX_SUPPLY) {
+        if (totalSupply() + amount > MAX_SUPPLY) {
             revert Matcha__MintingIsExceedMaxSupply();
         }
         _mint(to, amount);
