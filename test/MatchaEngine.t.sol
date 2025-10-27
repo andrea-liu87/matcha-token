@@ -6,6 +6,7 @@ import {MatchaEngine} from "../../src/MatchaEngine.sol";
 import {Matcha} from "../../src/Matcha.sol";
 import {MockV3Aggregator} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
+import {MockFailedTransferFrom} from "./mocks/MockFailedTransferFrom.sol";
 
 contract MatchaEngineTest is Test {
     MatchaEngine public matchaEngine;
@@ -81,11 +82,18 @@ contract MatchaEngineTest is Test {
     }
 
     function testRevertWhenDepositCollateralTransferFails() public {
-        // User without WETH tries to deposit
-        address userWithoutWeth = makeAddr("user without eth");
-        vm.prank(userWithoutWeth);
+        MockFailedTransferFrom mockEth = new MockFailedTransferFrom();
+        vm.startPrank(owner);
+        MatchaEngine mockEngine = new MatchaEngine(address(mockEth), address(ethUsdPriceFeed), address(matcha));
+        vm.stopPrank();
+
+        mockEth.mint(user, 10 ether);
+
+        vm.startPrank(user);
+        mockEth.approve(address(mockEngine), type(uint256).max);
         vm.expectRevert(MatchaEngine.MatchaEngine__TransferFailed.selector);
-        matchaEngine.depositCollateral(DEPOSIT_AMOUNT);
+        mockEngine.depositCollateral(DEPOSIT_AMOUNT);
+        vm.stopPrank();
     }
 
     // ============ Mint Matcha Tests ============
@@ -106,7 +114,7 @@ contract MatchaEngineTest is Test {
 
     function testRevertWhenMintMatchaWithoutCollateral() public {
         vm.prank(user);
-        vm.expectRevert(MatchaEngine.MatchaEngine__BreaksHealthFactor.selector);
+        vm.expectPartialRevert(MatchaEngine.MatchaEngine__BreaksHealthFactor.selector);
         matchaEngine.mintMatcha(MINT_AMOUNT);
     }
 
@@ -145,7 +153,7 @@ contract MatchaEngineTest is Test {
         uint256 excessiveMint = 3000 ether; // $3000 worth, but only $2000 collateral
 
         vm.prank(user);
-        vm.expectRevert(MatchaEngine.MatchaEngine__BreaksHealthFactor.selector);
+        vm.expectPartialRevert(MatchaEngine.MatchaEngine__BreaksHealthFactor.selector);
         matchaEngine.mintMatcha(excessiveMint);
     }
 
@@ -157,8 +165,10 @@ contract MatchaEngineTest is Test {
 
         uint256 initialMatchaBalance = matcha.balanceOf(user);
 
-        vm.prank(user);
+        vm.startPrank(user);
+        matcha.approve(address(matchaEngine), type(uint256).max);
         matchaEngine.burnMatcha(MINT_AMOUNT / 2);
+        vm.stopPrank();
 
         assertEq(matcha.balanceOf(user), initialMatchaBalance - (MINT_AMOUNT / 2));
     }
@@ -185,7 +195,7 @@ contract MatchaEngineTest is Test {
 
         // Try to redeem too much collateral
         vm.prank(user);
-        vm.expectRevert(MatchaEngine.MatchaEngine__BreaksHealthFactor.selector);
+        vm.expectPartialRevert(MatchaEngine.MatchaEngine__BreaksHealthFactor.selector);
         matchaEngine.redeemCollateral(DEPOSIT_AMOUNT);
     }
 
@@ -193,23 +203,25 @@ contract MatchaEngineTest is Test {
     function testLiquidate() public {
         // user deposits and mints
         vm.prank(user);
+        // deposit 1 ether = $2000, mint 500 matcha
         matchaEngine.depositCollateralAndMintMatcha(DEPOSIT_AMOUNT, MINT_AMOUNT);
 
         // Price drops to make user undercollateralized
-        ethUsdPriceFeed.updateAnswer(1000 * 1e8); // $1000 ETH
+        ethUsdPriceFeed.updateAnswer(500 * 1e8); // $500 ETH
+        uint256 userHealthFactor = matchaEngine.getHealthFactor(address(user)); // health factor 0.5
+        // deposit user now = $500 ---> only allowed 250 matcha max
+        uint256 debtToCover = 500 ether;
 
         // Liquidator prepares by getting Matcha tokens
-        vm.prank(address(matchaEngine));
-        matcha.transfer(liquidator, MINT_AMOUNT / 2);
-
-        vm.prank(liquidator);
+        vm.startPrank(liquidator);
         matcha.approve(address(matchaEngine), type(uint256).max);
-
+        // Deposit worth $2000 = 1 ether, mint 500 matcha
+        matchaEngine.depositCollateralAndMintMatcha(4 * DEPOSIT_AMOUNT, MINT_AMOUNT);
         uint256 initialLiquidatorWeth = weth.balanceOf(liquidator);
-        uint256 debtToCover = MINT_AMOUNT / 2;
 
-        vm.prank(liquidator);
         matchaEngine.liquidate(user, debtToCover);
+        uint256 userHealthFactorAfter = matchaEngine.getHealthFactor(address(user));
+        vm.stopPrank();
 
         // Liquidator should have received collateral with bonus
         assertGt(weth.balanceOf(liquidator), initialLiquidatorWeth);

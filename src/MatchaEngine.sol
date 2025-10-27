@@ -29,6 +29,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Matcha} from "./Matcha.sol";
 import {OracleLib} from "./libraries/OracleLib.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/shared/interfaces/AggregatorV3Interface.sol";
+import {console} from "forge-std/Test.sol";
 
 /*
  * @title MatchaEngine
@@ -181,9 +182,12 @@ contract MatchaEngine is ReentrancyGuard {
         // Burn Matcha equal to debtToCover
         // Figure out how much collateral to recover based on how much burnt
         _redeemCollateral(tokenAmountFromDebtCovered + bonusCollateral, user, msg.sender);
+        console.log("redeem colateral ", tokenAmountFromDebtCovered + bonusCollateral);
         _burnMatcha(debtToCover, user, msg.sender);
+        console.log("burn matcha ", debtToCover);
 
         uint256 endingUserHealthFactor = _healthFactor(user);
+        console.log("health factor ", endingUserHealthFactor);
         if (endingUserHealthFactor <= startingUserHealthFactor) {
             revert MatchaEngine__HealthFactorNotImproved();
         }
@@ -222,6 +226,9 @@ contract MatchaEngine is ReentrancyGuard {
     // Private Functions
     ///////////////////
     function _redeemCollateral(uint256 amountCollateral, address from, address to) private {
+        if (amountCollateral > s_userToAmountDeposited[from]) {
+            amountCollateral = s_userToAmountDeposited[from];
+        }
         s_userToAmountDeposited[from] -= amountCollateral;
         emit CollateralRedeemed(from, amountCollateral, from, to);
         bool success = IERC20(s_collateralToken).transfer(to, amountCollateral);
