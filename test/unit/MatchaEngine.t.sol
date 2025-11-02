@@ -6,7 +6,7 @@ import {MatchaEngine} from "../../src/MatchaEngine.sol";
 import {Matcha} from "../../src/Matcha.sol";
 import {MockV3Aggregator} from "@chainlink/contracts/src/v0.8/tests/MockV3Aggregator.sol";
 import {ERC20Mock} from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
-import {MockFailedTransferFrom} from "./mocks/MockFailedTransferFrom.sol";
+import {MockFailedTransferFrom} from "../mocks/MockFailedTransferFrom.sol";
 
 contract MatchaEngineTest is Test {
     MatchaEngine public matchaEngine;

@@ -319,7 +319,11 @@ contract MatchaEngine is ReentrancyGuard {
 
     function getUsdValue(
         uint256 amount // in WEI
-    ) external view returns (uint256) {
+    )
+        external
+        view
+        returns (uint256)
+    {
         return _getUsdValue(amount);
     }
 
